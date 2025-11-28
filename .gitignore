@@ -1,4 +1,71 @@
+# Data files
+data/*.csv
+data/*.txt
+!data/README.md
+!data/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints
+
+# Virtual environments
 venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Models
+models/*.pkl
+models/*.joblib
+models/*.h5
+!models/README.md
+!models/.gitkeep
+
+# Outputs
+outputs/submissions/*.csv
+outputs/visualizations/*.png
+!outputs/submissions/.gitkeep
+!outputs/visualizations/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Coveragehtmlcov/
+.coverage
+.coverage.*
+coverage.xmlvenv/
 *.csv
 __pycache__/
-ipynb_checkpoints/
