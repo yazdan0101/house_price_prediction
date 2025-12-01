@@ -1,15 +1,3 @@
-"""
-Prediction script for house price prediction model.
-
-Usage:
-    python scripts/predict.py [--model-name house_price_model.pkl] [--output submission.csv]
-
-This script:
-1. Loads trained model and preprocessing pipeline
-2. Loads test data
-3. Generates predictions
-4. Creates submission file
-"""
 
 import sys
 import argparse
