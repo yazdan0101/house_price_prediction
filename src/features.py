@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from config import EXPENSIVE_NEIGHBORHOODS
+from .config import EXPENSIVE_NEIGHBORHOODS
 
 
 class FeatureEngineer(BaseEstimator, TransformerMixin):
@@ -39,7 +39,10 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         List of feature names created during transformation
 
     Examples
-
+    --------
+    >>> engineer = FeatureEngineer()
+    >>> X_engineered = engineer.fit_transform(X)
+    >>> print(f"Created {len(engineer.created_features)} new features")
     """
 
     def __init__(self):
@@ -80,17 +83,18 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         # Track created features
         self.created_features = list(set(X.columns) - original_cols)
 
+        # ✅ SAFETY CHECK: Replace any inf/-inf with 0
+        X = X.replace([np.inf, -np.inf], 0)
+
+        # ✅ SAFETY CHECK: Fill any remaining NaN with 0
+        if X.isnull().sum().sum() > 0:
+            print(f"⚠️  Warning: Feature engineering created {X.isnull().sum().sum()} NaN values. Filling with 0...")
+            X = X.fillna(0)
+
         return X
 
     def _create_age_features(self, X):
-        """
-        Create age-related features.
-
-        Why: Age affects value through depreciation and modernization.
-        - New houses command premium prices
-        - Recent renovations add value
-        - Garage age may differ from house age
-        """
+        """Create age-related features."""
         X['HouseAge'] = X['YrSold'] - X['YearBuilt']
         X['RemodAge'] = X['YrSold'] - X['YearRemodAdd']
         X['GarageAge'] = X['YrSold'] - X['GarageYrBlt']
@@ -101,13 +105,7 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         return X
 
     def _create_area_features(self, X):
-        """
-        Create total area features.
-
-        Why: Buyers think in total square footage, not individual floors.
-        TotalSF is typically the single most important engineered feature,
-        increasing correlation with price from ~0.6 to ~0.8.
-        """
+        """Create total area features."""
         # Total square footage (CRITICAL FEATURE!)
         X['TotalSF'] = X['TotalBsmtSF'] + X['1stFlrSF'] + X['2ndFlrSF']
 
@@ -126,24 +124,13 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         return X
 
     def _create_ratio_features(self, X):
-        """
-        Create ratio features.
-
-        Why: Ratios capture efficiency and proportions that matter to buyers.
-        - Large rooms are more valuable than many small rooms
-        - Finished basement percentage affects value
-        - Lot coverage affects outdoor space availability
-
-        Note: Add +1 to denominators to avoid division by zero
-        """
-        # Spaciousness metrics
+        """Create ratio features."""
+        # Spaciousness metrics (add 1 to avoid division by zero)
         X['AreaPerRoom'] = X['GrLivArea'] / (X['TotRmsAbvGrd'] + 1)
         X['GarageAreaPerCar'] = X['GarageArea'] / (X['GarageCars'] + 1)
 
         # Completion/finish percentages
-        X['BsmtFinPercent'] = (
-                (X['BsmtFinSF1'] + X['BsmtFinSF2']) / (X['TotalBsmtSF'] + 1)
-        )
+        X['BsmtFinPercent'] = (X['BsmtFinSF1'] + X['BsmtFinSF2']) / (X['TotalBsmtSF'] + 1)
         X['SecondFlrPercent'] = X['2ndFlrSF'] / (X['TotalSF'] + 1)
 
         # Lot utilization
@@ -157,14 +144,7 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         return X
 
     def _create_quality_interactions(self, X):
-        """
-        Create quality interaction features.
-
-        Why: Quality and condition together determine value.
-        - High quality + poor condition ≠ Low quality + excellent condition
-        - Multiplication captures combined effect
-        - Addition captures grade/tier
-        """
+        """Create quality interaction features."""
         # Overall quality metrics
         X['OverallQualCond'] = X['OverallQual'] * X['OverallCond']
         X['OverallQualGrade'] = X['OverallQual'] + X['OverallCond']
@@ -180,14 +160,7 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         return X
 
     def _create_quality_area_interactions(self, X):
-        """
-        Create quality × area interaction features.
-
-        Why: These are GOLD! Top Kaggle solutions all use these.
-        - Large house + poor quality ≠ Large house + excellent quality
-        - Captures "how much VALUABLE space" not just "how much space"
-        - Quality-weighted area is more predictive than area alone
-        """
+        """Create quality × area interaction features."""
         X['QualityArea'] = X['OverallQual'] * X['GrLivArea']
         X['QualityBath'] = X['OverallQual'] * X['TotalBath']
         X['QualityGarage'] = X['OverallQual'] * X['GarageArea']
@@ -196,14 +169,7 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         return X
 
     def _create_boolean_features(self, X):
-        """
-        Create boolean "has X" features.
-
-        Why: Presence often matters more than exact size.
-        - Having a pool: 0→500 sqft is huge jump in value
-        - Pool size: 500→600 sqft is small difference
-        - Binary signal (0/1) is easy for models to learn
-        """
+        """Create boolean "has X" features."""
         X['HasPool'] = (X['PoolArea'] > 0).astype(int)
         X['HasGarage'] = (X['GarageArea'] > 0).astype(int)
         X['HasBsmt'] = (X['TotalBsmtSF'] > 0).astype(int)
@@ -217,14 +183,7 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         return X
 
     def _create_polynomial_features(self, X):
-        """
-        Create polynomial (squared) features.
-
-        Why: Captures non-linear relationships.
-        - Price doesn't increase linearly with size
-        - Larger houses have exponentially more value
-        - Quality 10 is MORE than 2× quality 5 in impact
-        """
+        """Create polynomial (squared) features."""
         X['GrLivArea_Squared'] = X['GrLivArea'] ** 2
         X['TotalSF_Squared'] = X['TotalSF'] ** 2
         X['OverallQual_Squared'] = X['OverallQual'] ** 2
@@ -232,13 +191,7 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         return X
 
     def _create_neighborhood_features(self, X):
-        """
-        Create neighborhood features.
-
-        Why: Location, location, location!
-        Some neighborhoods (NoRidge, NridgHt, StoneBr) are significantly
-        more expensive. Binary flag helps model learn this pattern.
-        """
+        """Create neighborhood features."""
         X['IsExpensiveNeighborhood'] = (
             X['Neighborhood'].isin(EXPENSIVE_NEIGHBORHOODS).astype(int)
         )
@@ -246,53 +199,20 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         return X
 
     def _create_temporal_features(self, X):
-        """
-        Create temporal (seasonal) features.
-
-        Why: Real estate has seasonality (spring/summer vs winter).
-        Problem: Month is circular (December and January are adjacent)
-        Solution: Sine/cosine encoding preserves circular nature
-        """
+        """Create temporal (seasonal) features."""
         X['MonthSoldSin'] = np.sin(2 * np.pi * X['MoSold'] / 12)
         X['MonthSoldCos'] = np.cos(2 * np.pi * X['MoSold'] / 12)
 
         return X
 
     def get_feature_names(self):
-        """
-        Get list of created feature names.
-
-        Returns
-        -------
-        list
-            List of engineered feature names
-        """
+        """Get list of created feature names."""
         return self.created_features
 
 
 class FeatureSelector(BaseEstimator, TransformerMixin):
     """
     Select features based on importance threshold.
-
-    Optionally removes low-importance features to reduce dimensionality
-    and prevent overfitting.
-
-    Parameters
-    ----------
-    threshold : float, default=0.001
-        Minimum feature importance to keep
-    model : estimator, optional
-        Model to use for feature importance calculation
-
-    Attributes
-    ----------
-    selected_features : list
-        Features selected after fitting
-    feature_importances : dict
-        Feature importance scores
-
-    Examples
-    --------
     """
 
     def __init__(self, threshold=0.001, model=None):
@@ -302,20 +222,7 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
         self.feature_importances = None
 
     def fit(self, X, y):
-        """
-        Fit feature selector.
-
-        Parameters
-        ----------
-        X : pd.DataFrame or np.ndarray
-            Input features
-        y : array-like
-            Target variable
-
-        Returns
-        -------
-        self
-        """
+        """Fit feature selector."""
         if self.model is None:
             # If no model provided, keep all features
             if isinstance(X, pd.DataFrame):
@@ -345,21 +252,8 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X):
-        """
-        Transform by selecting features.
-
-        Parameters
-        ----------
-        X : pd.DataFrame or np.ndarray
-            Input features
-
-        Returns
-        -------
-        X : pd.DataFrame or np.ndarray
-            Selected features
-        """
+        """Transform by selecting features."""
         if isinstance(X, pd.DataFrame):
             return X[self.selected_features]
         else:
-            # For numpy arrays, assume selected_features are indices
             return X[:, self.selected_features]

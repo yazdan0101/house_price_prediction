@@ -96,6 +96,13 @@ class StackingEnsemble(BaseEstimator, RegressorMixin):
         -------
         self
         """
+        # ✅ Convert to numpy arrays to avoid indexing issues
+        if isinstance(X, pd.DataFrame):
+            X = X.values
+        if isinstance(y, pd.Series):
+            y = y.values
+
+        # Initialize
         self.base_models_ = [[] for _ in self.base_models]
         self.meta_model_ = clone(self.meta_model)
 
@@ -104,12 +111,18 @@ class StackingEnsemble(BaseEstimator, RegressorMixin):
         # Generate out-of-fold predictions for meta-model
         out_of_fold_predictions = np.zeros((X.shape[0], len(self.base_models)))
 
+        print(f"  Training {len(self.base_models)} base models with {self.n_folds}-fold CV...")
+
         for i, model in enumerate(self.base_models):
-            for train_idx, val_idx in kfold.split(X):
+            model_name = model.__class__.__name__ if not hasattr(model, 'steps') else 'Pipeline'
+            print(f"    Base model {i + 1}/{len(self.base_models)}: {model_name}")
+
+            for fold_num, (train_idx, val_idx) in enumerate(kfold.split(X), 1):
                 # Clone and fit model
                 instance = clone(model)
                 self.base_models_[i].append(instance)
 
+                # Fit on training fold
                 instance.fit(X[train_idx], y[train_idx])
 
                 # Generate out-of-fold predictions
@@ -117,6 +130,7 @@ class StackingEnsemble(BaseEstimator, RegressorMixin):
                 out_of_fold_predictions[val_idx, i] = y_pred
 
         # Train meta-model on out-of-fold predictions
+        print(f"  Training meta-model...")
         self.meta_model_.fit(out_of_fold_predictions, y)
 
         return self
@@ -135,6 +149,10 @@ class StackingEnsemble(BaseEstimator, RegressorMixin):
         y_pred : array, shape (n_samples,)
             Predicted values
         """
+        # ✅ Convert to numpy array
+        if isinstance(X, pd.DataFrame):
+            X = X.values
+
         # Generate predictions from each base model (average across folds)
         meta_features = np.column_stack([
             np.column_stack([model.predict(X) for model in base_models]).mean(axis=1)
@@ -245,6 +263,17 @@ class HousePriceModel(BaseEstimator, RegressorMixin):
         -------
         self
         """
+        # ✅ Convert to numpy arrays if needed
+        if isinstance(X, pd.DataFrame):
+            X_array = X.values
+        else:
+            X_array = X
+
+        if isinstance(y, pd.Series):
+            y_array = y.values
+        else:
+            y_array = y
+
         self.models = self._get_models()
         kfold = KFold(n_splits=cv, shuffle=True, random_state=RANDOM_STATE)
 
@@ -260,7 +289,7 @@ class HousePriceModel(BaseEstimator, RegressorMixin):
 
             # Cross-validation
             scores = cross_val_score(
-                model, X, y,
+                model, X_array, y_array,
                 cv=kfold,
                 scoring='neg_mean_squared_error',
                 n_jobs=-1
@@ -274,7 +303,7 @@ class HousePriceModel(BaseEstimator, RegressorMixin):
                 print(f"  CV RMSE: {rmse:.5f} (+/- {std:.5f})")
 
             # Train on full dataset
-            model.fit(X, y)
+            model.fit(X_array, y_array)
 
         # Identify best model
         self.best_model_name = min(self.cv_scores.items(), key=lambda x: x[1][0])[0]
@@ -293,7 +322,7 @@ class HousePriceModel(BaseEstimator, RegressorMixin):
             base_model_names = [name for name, _ in sorted_models[:3]]
             base_models = [self.models[name] for name in base_model_names]
 
-            # Use best model as meta
+            # Use Lasso as meta-model
             meta_model = Pipeline([
                 ('scaler', RobustScaler()),
                 ('model', Lasso(alpha=0.001, random_state=RANDOM_STATE))
@@ -305,11 +334,12 @@ class HousePriceModel(BaseEstimator, RegressorMixin):
                 n_folds=cv
             )
 
-            self.stacking.fit(X, y)
+            # Fit stacking ensemble
+            self.stacking.fit(X_array, y_array)
 
             # Evaluate stacking
             stacking_scores = cross_val_score(
-                self.stacking, X, y,
+                self.stacking, X_array, y_array,
                 cv=kfold,
                 scoring='neg_mean_squared_error',
                 n_jobs=-1
@@ -344,10 +374,16 @@ class HousePriceModel(BaseEstimator, RegressorMixin):
         y_pred : array, shape (n_samples,)
             Predicted values
         """
-        if use_ensemble:
-            return self._predict_ensemble(X)
+        # ✅ Convert to numpy array if needed
+        if isinstance(X, pd.DataFrame):
+            X_array = X.values
         else:
-            return self.models[self.best_model_name].predict(X)
+            X_array = X
+
+        if use_ensemble:
+            return self._predict_ensemble(X_array)
+        else:
+            return self.models[self.best_model_name].predict(X_array)
 
     def _predict_ensemble(self, X):
         """Generate weighted ensemble predictions."""
@@ -458,6 +494,12 @@ def evaluate_model(model, X, y, cv=N_FOLDS):
     std_rmse : float
         Standard deviation of RMSE
     """
+    # ✅ Convert to numpy arrays
+    if isinstance(X, pd.DataFrame):
+        X = X.values
+    if isinstance(y, pd.Series):
+        y = y.values
+
     kfold = KFold(n_splits=cv, shuffle=True, random_state=RANDOM_STATE)
     scores = cross_val_score(
         model, X, y,

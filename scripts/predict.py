@@ -128,7 +128,54 @@ def main():
     X_test_processed = preprocessing_pipeline.transform(X_test)
 
     print(f"Processed test shape: {X_test_processed.shape}")
-    print(f"Missing values: {pd.DataFrame(X_test_processed).isnull().sum().sum()}")
+
+    # ✅ Check for missing values
+    if isinstance(X_test_processed, pd.DataFrame):
+        missing_count = X_test_processed.isnull().sum().sum()
+    else:
+        missing_count = pd.DataFrame(X_test_processed).isnull().sum().sum()
+
+    print(f"Missing values: {missing_count}")
+
+    if missing_count > 0:
+        print("\n⚠️  WARNING: Missing values detected after preprocessing!")
+
+        # Convert to DataFrame if needed
+        if not isinstance(X_test_processed, pd.DataFrame):
+            X_test_processed = pd.DataFrame(X_test_processed)
+
+        missing_cols = X_test_processed.columns[X_test_processed.isnull().any()].tolist()
+        print(f"Columns with missing values: {len(missing_cols)}")
+
+        # Show details for first 10 columns
+        for col in missing_cols[:10]:
+            n_missing = X_test_processed[col].isnull().sum()
+            print(f"  - Column {col}: {n_missing} missing")
+
+        if len(missing_cols) > 10:
+            print(f"  ... and {len(missing_cols) - 10} more columns")
+
+        # Fill remaining NaN with 0 (emergency fallback)
+        print("\n🔧 Filling remaining NaN values with 0 (emergency fallback)...")
+        X_test_processed = X_test_processed.fillna(0)
+
+        # Convert back to numpy if needed
+        if not isinstance(X_test_processed, pd.DataFrame):
+            X_test_processed = X_test_processed.values
+
+        print("✅ All NaN values handled")
+    else:
+        print("✅ No missing values detected")
+
+    # Verify all numeric
+    if isinstance(X_test_processed, pd.DataFrame):
+        non_numeric = X_test_processed.select_dtypes(exclude=[np.number]).columns.tolist()
+        if non_numeric:
+            print(f"\n⚠️  WARNING: Non-numeric columns detected: {non_numeric}")
+            print("Converting to numeric...")
+            for col in non_numeric:
+                X_test_processed[col] = pd.to_numeric(X_test_processed[col], errors='coerce').fillna(0)
+        print("✅ All columns are numeric")
 
     # ========================================
     # STEP 4: GENERATE PREDICTIONS

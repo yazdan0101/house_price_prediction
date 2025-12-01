@@ -14,41 +14,20 @@ from sklearn.preprocessing import LabelEncoder
 from scipy.stats import skew
 from scipy.special import boxcox1p
 
-from config import (
+from .config import (
     QUALITY_MAP, BASEMENT_EXPOSURE_MAP, BASEMENT_FINISH_MAP,
     GARAGE_FINISH_MAP, FENCE_MAP, SKEWNESS_THRESHOLD, BOXCOX_LAMBDA
 )
 
 
 class MissingValueHandler(BaseEstimator, TransformerMixin):
-    """
-    Handle missing values with domain knowledge.
-
-    Strategy:
-    - NA means "None" for features where absence is meaningful
-    - NA means 0 for associated numeric features
-    - Neighborhood-based imputation for LotFrontage
-    - Mode/median for remaining features
-
-    Parameters
-    ----------
-    None
-
-    Attributes
-    ----------
-    none_features : list
-        Features where NA means "None"
-    zero_features : list
-        Features where NA means 0
-
-    """
 
     def __init__(self):
         self.none_features = [
             'PoolQC', 'MiscFeature', 'Alley', 'Fence', 'FireplaceQu',
             'GarageType', 'GarageFinish', 'GarageQual', 'GarageCond',
             'BsmtQual', 'BsmtCond', 'BsmtExposure', 'BsmtFinType1', 'BsmtFinType2',
-            'MasVnrType'
+            'MasVnrType', 'MSSubClass'
         ]
 
         self.zero_features = [
@@ -57,13 +36,64 @@ class MissingValueHandler(BaseEstimator, TransformerMixin):
             'BsmtFullBath', 'BsmtHalfBath', 'MasVnrArea'
         ]
 
+        self.categorical_modes = {}
+        self.numerical_medians = {}
+        self.neighborhood_lotfrontage = {}
+
     def fit(self, X, y=None):
-        """Fit the transformer (no-op for this transformer)."""
+        """
+        Fit the transformer by learning mode/median values from training data.
+
+        Parameters
+        ----------
+        X : pd.DataFrame
+            Input features (training data)
+        y : None
+            Ignored
+
+        Returns
+        -------
+        self
+        """
+        X = X.copy()
+
+        # Apply Category 1 and 2 first
+        for col in self.none_features:
+            if col in X.columns:
+                X[col] = X[col].fillna('None')
+
+        for col in self.zero_features:
+            if col in X.columns:
+                X[col] = X[col].fillna(0)
+
+        # Learn neighborhood-based LotFrontage medians
+        if 'LotFrontage' in X.columns and 'Neighborhood' in X.columns:
+            self.neighborhood_lotfrontage = X.groupby('Neighborhood')['LotFrontage'].median().to_dict()
+            # Store overall median as fallback
+            self.neighborhood_lotfrontage['__overall__'] = X['LotFrontage'].median()
+
+        # Learn modes for ALL categorical features
+        categorical_cols = X.select_dtypes(include=['object']).columns
+        for col in categorical_cols:
+            if X[col].notna().sum() > 0:
+                mode_values = X[col].mode()
+                self.categorical_modes[col] = mode_values[0] if len(mode_values) > 0 else 'Missing'
+            else:
+                self.categorical_modes[col] = 'Missing'
+
+        # Learn medians for ALL numerical features
+        numerical_cols = X.select_dtypes(include=[np.number]).columns
+        for col in numerical_cols:
+            if X[col].notna().sum() > 0:
+                self.numerical_medians[col] = X[col].median()
+            else:
+                self.numerical_medians[col] = 0
+
         return self
 
-    def transform(self, X:pd.DataFrame):
+    def transform(self, X):
         """
-        Transform the data by imputing missing values.
+        Transform the data by imputing missing values using learned statistics.
 
         Parameters
         ----------
@@ -75,7 +105,7 @@ class MissingValueHandler(BaseEstimator, TransformerMixin):
         X : pd.DataFrame
             Transformed features with imputed values
         """
-        X  = X.copy()
+        X = X.copy()
 
         # Category 1: NA means "None"
         for col in self.none_features:
@@ -89,40 +119,43 @@ class MissingValueHandler(BaseEstimator, TransformerMixin):
 
         # Category 3: LotFrontage - fill with median by Neighborhood
         if 'LotFrontage' in X.columns and 'Neighborhood' in X.columns:
-            X['LotFrontage'] = X.groupby('Neighborhood')['LotFrontage'].transform(
-                lambda x: x.fillna(x.median())
-            )
+            if self.neighborhood_lotfrontage:
+                # Use learned medians from training
+                for idx in X.index:
+                    if pd.isna(X.loc[idx, 'LotFrontage']):
+                        neighborhood = X.loc[idx, 'Neighborhood']
+                        # Use neighborhood median if available, else overall median
+                        if neighborhood in self.neighborhood_lotfrontage:
+                            X.loc[idx, 'LotFrontage'] = self.neighborhood_lotfrontage[neighborhood]
+                        else:
+                            X.loc[idx, 'LotFrontage'] = self.neighborhood_lotfrontage.get('__overall__', 0)
 
-        # Remaining: fill with mode (categorical) or median (numerical)
+            # Fill any remaining NaN with overall median
+            if X['LotFrontage'].isna().any():
+                overall_median = self.neighborhood_lotfrontage.get('__overall__', 0)
+                X['LotFrontage'] = X['LotFrontage'].fillna(overall_median)
+
+        # Category 4: Fill ALL remaining missing values with learned statistics
         for col in X.columns:
             if X[col].isnull().sum() > 0:
                 if X[col].dtype == 'object':
-                    X[col] = X[col].fillna(X[col].mode()[0])
+                    # Use learned mode
+                    fill_value = self.categorical_modes.get(col, 'Missing')
+                    X[col] = X[col].fillna(fill_value)
                 else:
-                    X[col] = X[col].fillna(X[col].median())
+                    # Use learned median
+                    fill_value = self.numerical_medians.get(col, 0)
+                    X[col] = X[col].fillna(fill_value)
+
+        # Final safety check: fill any remaining NaN with 0
+        if X.isnull().sum().sum() > 0:
+            print(f"⚠️  Warning: {X.isnull().sum().sum()} remaining NaN values. Filling with 0...")
+            X = X.fillna(0)
 
         return X
 
 
 class CategoricalEncoder(BaseEstimator, TransformerMixin):
-    """
-    Encode categorical features with proper ordering.
-
-    Uses ordinal encoding for quality features (Ex > Gd > TA > Fa > Po)
-    and label encoding for nominal features.
-
-    Parameters
-    ----------
-    None
-
-    Attributes
-    ----------
-    label_encoders : dict
-        Dictionary of fitted LabelEncoder objects
-    quality_cols : list
-        Columns to encode with quality mapping
-    """
-
     def __init__(self):
         self.label_encoders = {}
         self.quality_cols = [
@@ -235,6 +268,12 @@ class SkewnessFixer(BaseEstimator, TransformerMixin):
     ----------
     skewed_features : list
         Features identified as skewed during fit
+
+    Examples
+    --------
+    >>> fixer = SkewnessFixer(threshold=0.75, lam=0.15)
+    >>> fixer.fit(X_train)
+    >>> X_fixed = fixer.transform(X_test)
     """
 
     def __init__(self, threshold=SKEWNESS_THRESHOLD, lam=BOXCOX_LAMBDA):
