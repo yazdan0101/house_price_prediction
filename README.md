@@ -20,19 +20,6 @@ A comprehensive machine learning solution for predicting house prices using adva
 - **Production-ready code** - Modular, tested, documented
 
 ---
-
-## 📊 Results
-
-| Model | CV RMSE | Public LB |
-|-------|---------|-----------|
-| ElasticNet | 0.1165 | - |
-| Gradient Boosting | 0.1142 | - |
-| XGBoost | 0.1128 | - |
-| LightGBM | 0.1135 | - |
-| **Stacking Ensemble** | **0.1098** | **0.1125** |
-
----
-
 ## 🚀 Quick Start
 
 ### 1. Clone the repository
